@@ -16891,8 +16891,7 @@ namespace ts {
                     expr = (<ParenthesizedExpression>expr).expression;
                 }
                 if (expr.kind === SyntaxKind.Identifier || expr.kind === SyntaxKind.PropertyAccessExpression) {
-                    let symbol;
-                    symbol = getResolvedSymbol(<Identifier>expr);
+                    let symbol = getResolvedSymbol(<Identifier>expr);
                     if (!symbol || !symbol.declarations) {
                         return undefined;
                     }
