@@ -16892,33 +16892,7 @@ namespace ts {
                 }
                 if (expr.kind === SyntaxKind.Identifier || expr.kind === SyntaxKind.PropertyAccessExpression) {
                     let symbol;
-                    if (isPropertyAccessExpression(expr)) {
-                        // TODO ignore method calls for now
-                        return;
-                        /*
-                        let left: Expression = expr.expression;
-                        while (left.kind === SyntaxKind.ParenthesizedExpression) {
-                            left = (<ParenthesizedExpression>left).expression;
-                        }
-                        if (left.kind !== SyntaxKind.ThisKeyword) {
-                            return;
-                        }
-                        symbol = getPropertyOfType(
-                            getThisType(expr),
-                            expr.name.escapedText,
-                        );
-                        if (!symbol) {
-                            return;
-                        }
-                        const flags = getDeclarationModifierFlagsFromSymbol(symbol);
-                        // Only analyze private methods
-                        if (!(ModifierFlags.Private & flags)) {
-                            return;
-                        }*/
-                    }
-                    else {
-                        symbol = getResolvedSymbol(<Identifier>expr);
-                    }
+                    symbol = getResolvedSymbol(<Identifier>expr);
                     if (!symbol || !symbol.declarations) {
                         return undefined;
                     }
