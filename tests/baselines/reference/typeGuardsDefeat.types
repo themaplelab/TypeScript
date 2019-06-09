@@ -2,7 +2,7 @@
 // Also note that it is possible to defeat a type guard by calling a function that changes the 
 // type of the guarded variable.
 function foo(x: number | string) {
->foo : (x: string | number) => number
+>foo : (x: string | number) => any
 >x : string | number
 
     function f() {
@@ -24,9 +24,9 @@ function foo(x: number | string) {
 >f : () => void
 
         return x.length; // string
->x.length : number
->x : string
->length : number
+>x.length : any
+>x : number
+>length : any
     }
     else {
         return x++; // number

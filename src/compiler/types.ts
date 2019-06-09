@@ -1033,6 +1033,7 @@ namespace ts {
         questionToken?: QuestionToken;
         exclamationToken?: ExclamationToken;
         body?: Block | Expression;
+        /* @internal */ returnFlowNode?: FlowNode;
     }
 
     export type FunctionLikeDeclaration =
@@ -1078,7 +1079,6 @@ namespace ts {
         kind: SyntaxKind.Constructor;
         parent: ClassLikeDeclaration;
         body?: FunctionBody;
-        /* @internal */ returnFlowNode?: FlowNode;
     }
 
     /** For when we encounter a semicolon in a class declaration. ES6 allows these as class elements. */
@@ -2548,6 +2548,7 @@ namespace ts {
         AfterFinally   = 1 << 12, // Injected edge that links post-finally flow with the rest of the graph
         /** @internal */
         Cached         = 1 << 13, // Indicates that at least one cross-call cache entry exists for this node, even if not a loop participant
+        Interprocedural = 1 << 14, // Edge to include the body of a called function in flow
         Label = BranchLabel | LoopLabel,
         Condition = TrueCondition | FalseCondition
     }
@@ -2566,7 +2567,7 @@ namespace ts {
     }
 
     export type FlowNode =
-        | AfterFinallyFlow | PreFinallyFlow | FlowStart | FlowLabel | FlowAssignment | FlowCondition | FlowSwitchClause | FlowArrayMutation;
+        | AfterFinallyFlow | PreFinallyFlow | FlowStart | FlowLabel | FlowAssignment | FlowCondition | FlowSwitchClause | FlowArrayMutation | FlowInterprocedural;
     export interface FlowNodeBase {
         flags: FlowFlags;
         id?: number;     // Node id used by flow type cache in checker
@@ -2609,6 +2610,13 @@ namespace ts {
     // operation of the form 'x.push(value)', 'x.unshift(value)' or 'x[n] = value'.
     export interface FlowArrayMutation extends FlowNodeBase {
         node: CallExpression | BinaryExpression;
+        antecedent: FlowNode;
+    }
+
+    // FlowFunctionCall represents a node that occurs after
+    // a function that can be analyzed is called
+    export interface FlowInterprocedural extends FlowNodeBase {
+        node: CallExpression;
         antecedent: FlowNode;
     }
 

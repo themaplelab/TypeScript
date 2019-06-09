@@ -18,9 +18,7 @@ function foo(x: number | string) {
 >f : Symbol(f, Decl(typeGuardsDefeat.ts, 2, 34))
 
         return x.length; // string
->x.length : Symbol(String.length, Decl(lib.es5.d.ts, --, --))
 >x : Symbol(x, Decl(typeGuardsDefeat.ts, 2, 13))
->length : Symbol(String.length, Decl(lib.es5.d.ts, --, --))
     }
     else {
         return x++; // number

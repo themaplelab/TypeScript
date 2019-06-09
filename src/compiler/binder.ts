@@ -558,13 +558,13 @@ namespace ts {
                 // similarly to break statements that exit to a label just past the statement body.
                 if (!isIIFE) {
                     currentFlow = { flags: FlowFlags.Start };
-                    if (containerFlags & (ContainerFlags.IsFunctionExpression | ContainerFlags.IsObjectLiteralOrClassExpressionMethod)) {
+                    if (containerFlags & (ContainerFlags.IsFunctionLike | ContainerFlags.IsFunctionExpression | ContainerFlags.IsObjectLiteralOrClassExpressionMethod)) {
                         currentFlow.container = <FunctionExpression | ArrowFunction | MethodDeclaration>node;
                     }
                 }
                 // We create a return control flow graph for IIFEs and constructors. For constructors
                 // we use the return control flow graph in strict property initialization checks.
-                currentReturnTarget = isIIFE || node.kind === SyntaxKind.Constructor ? createBranchLabel() : undefined;
+                currentReturnTarget = isIIFE || isFunctionLikeDeclaration(node) ? createBranchLabel() : undefined;
                 currentBreakTarget = undefined;
                 currentContinueTarget = undefined;
                 activeLabels = undefined;
@@ -584,8 +584,8 @@ namespace ts {
                 if (currentReturnTarget) {
                     addAntecedent(currentReturnTarget, currentFlow);
                     currentFlow = finishFlowLabel(currentReturnTarget);
-                    if (node.kind === SyntaxKind.Constructor) {
-                        (<ConstructorDeclaration>node).returnFlowNode = currentFlow;
+                    if (isFunctionLikeDeclaration(node)) {
+                        node.returnFlowNode = currentFlow;
                     }
                 }
                 if (!isIIFE) {
@@ -896,6 +896,10 @@ namespace ts {
             setFlowNodeReferenced(antecedent);
             const res: FlowArrayMutation = flowNodeCreated({ flags: FlowFlags.ArrayMutation, antecedent, node });
             return res;
+        }
+
+        function createFlowInterprocedural(antecedent: FlowNode, node: CallExpression): FlowNode {
+            return flowNodeCreated({ flags: FlowFlags.Interprocedural, node, antecedent, marker: "TODO remove" });
         }
 
         function finishFlowLabel(flow: FlowLabel): FlowNode {
@@ -1455,6 +1459,7 @@ namespace ts {
             }
             else {
                 bindEachChild(node);
+                currentFlow = createFlowInterprocedural(currentFlow, node);
             }
             if (node.expression.kind === SyntaxKind.PropertyAccessExpression) {
                 const propertyAccess = <PropertyAccessExpression>node.expression;
@@ -2307,7 +2312,7 @@ namespace ts {
                     if (node.parent.kind !== SyntaxKind.JSDocTypeLiteral) {
                         break;
                     }
-                    // falls through
+                // falls through
                 case SyntaxKind.JSDocPropertyTag:
                     const propTag = node as JSDocPropertyLikeTag;
                     const flags = propTag.isBracketed || propTag.typeExpression && propTag.typeExpression.type.kind === SyntaxKind.JSDocOptionalType ?
@@ -2374,8 +2379,8 @@ namespace ts {
             }
             const diag = !isSourceFile(node.parent) ? Diagnostics.Global_module_exports_may_only_appear_at_top_level
                 : !isExternalModule(node.parent) ? Diagnostics.Global_module_exports_may_only_appear_in_module_files
-                : !node.parent.isDeclarationFile ? Diagnostics.Global_module_exports_may_only_appear_in_declaration_files
-                : undefined;
+                    : !node.parent.isDeclarationFile ? Diagnostics.Global_module_exports_may_only_appear_in_declaration_files
+                        : undefined;
             if (diag) {
                 file.bindDiagnostics.push(createDiagnosticForNode(node, diag));
             }
@@ -2666,9 +2671,9 @@ namespace ts {
             }
             let init = !node ? undefined :
                 isVariableDeclaration(node) ? node.initializer :
-                isBinaryExpression(node) ? node.right :
-                isPropertyAccessExpression(node) && isBinaryExpression(node.parent) ? node.parent.right :
-                undefined;
+                    isBinaryExpression(node) ? node.right :
+                        isPropertyAccessExpression(node) && isBinaryExpression(node.parent) ? node.parent.right :
+                            undefined;
             init = init && getRightMostAssignedExpression(init);
             if (init) {
                 const isPrototypeAssignment = isPrototypeAccess(isVariableDeclaration(node) ? node.name : isBinaryExpression(node) ? node.left : node);

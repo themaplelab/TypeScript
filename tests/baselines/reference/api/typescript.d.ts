@@ -1659,6 +1659,7 @@ declare namespace ts {
         Shared = 1024,
         PreFinally = 2048,
         AfterFinally = 4096,
+        Interprocedural = 16384,
         Label = 12,
         Condition = 96
     }
@@ -1672,7 +1673,7 @@ declare namespace ts {
         antecedent: FlowNode;
         lock: FlowLock;
     }
-    type FlowNode = AfterFinallyFlow | PreFinallyFlow | FlowStart | FlowLabel | FlowAssignment | FlowCondition | FlowSwitchClause | FlowArrayMutation;
+    type FlowNode = AfterFinallyFlow | PreFinallyFlow | FlowStart | FlowLabel | FlowAssignment | FlowCondition | FlowSwitchClause | FlowArrayMutation | FlowInterprocedural;
     interface FlowNodeBase {
         flags: FlowFlags;
         id?: number;
@@ -1699,6 +1700,10 @@ declare namespace ts {
     }
     interface FlowArrayMutation extends FlowNodeBase {
         node: CallExpression | BinaryExpression;
+        antecedent: FlowNode;
+    }
+    interface FlowInterprocedural extends FlowNodeBase {
+        node: CallExpression;
         antecedent: FlowNode;
     }
     type FlowType = Type | IncompleteType;
