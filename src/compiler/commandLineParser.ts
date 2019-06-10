@@ -650,6 +650,12 @@ namespace ts {
 
         // Advanced
         {
+            name: "interprocedural",
+            type: "boolean",
+            category: Diagnostics.Advanced_Options,
+            description: Diagnostics.Enables_interprocedural_type_analysis
+        },
+        {
             name: "jsxFactory",
             type: "string",
             category: Diagnostics.Advanced_Options,

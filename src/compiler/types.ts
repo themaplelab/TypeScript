@@ -4695,6 +4695,7 @@ namespace ts {
         /* @internal */ preserveWatchOutput?: boolean;
         project?: string;
         /* @internal */ pretty?: boolean;
+        interprocedural?: boolean;
         reactNamespace?: string;
         jsxFactory?: string;
         composite?: boolean;

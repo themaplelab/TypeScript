@@ -1459,7 +1459,9 @@ namespace ts {
             }
             else {
                 bindEachChild(node);
-                currentFlow = createFlowInterprocedural(currentFlow, node);
+                if (options.interprocedural) {
+                    currentFlow = createFlowInterprocedural(currentFlow, node);
+                }
             }
             if (node.expression.kind === SyntaxKind.PropertyAccessExpression) {
                 const propertyAccess = <PropertyAccessExpression>node.expression;
