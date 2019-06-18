@@ -16614,11 +16614,6 @@ namespace ts {
                         }
                     }
                     else if (flags & FlowFlags.Interprocedural) {
-                        if (reference.kind === SyntaxKind.ThisKeyword || reference.kind === SyntaxKind.SuperKeyword) {
-                            // Not considering arrow functions which may share lexical this
-                            flow = (<FlowInterprocedural>flow).antecedent;
-                            continue;
-                        }
                         type = getTypeAtFlowInterprocedural(<FlowInterprocedural>flow);
                         if (!type) {
                             flow = (<FlowInterprocedural>flow).antecedent;
@@ -16885,13 +16880,12 @@ namespace ts {
                 return result;
             }
 
-            function getInterproceduralContainer(flow: FlowInterprocedural): FunctionLikeDeclaration | undefined {
-                let expr: Expression = flow.node.expression;
-                while (expr.kind === SyntaxKind.ParenthesizedExpression) {
-                    expr = (<ParenthesizedExpression>expr).expression;
+            function getInterproceduralContainer(expression: Expression): FunctionLikeDeclaration | undefined {
+                while (expression.kind === SyntaxKind.ParenthesizedExpression) {
+                    expression = (<ParenthesizedExpression>expression).expression;
                 }
-                if (expr.kind === SyntaxKind.Identifier || expr.kind === SyntaxKind.PropertyAccessExpression) {
-                    let symbol = getResolvedSymbol(<Identifier>expr);
+                if (expression.kind === SyntaxKind.Identifier) {
+                    const symbol = getResolvedSymbol(<Identifier>expression);
                     if (!symbol || !symbol.declarations) {
                         return undefined;
                     }
@@ -16904,19 +16898,134 @@ namespace ts {
                 return undefined;
             }
 
+            function getEmbeddableFunctionParameters(func: FunctionLikeDeclaration, callsite: CallExpression): FunctionLikeDeclaration[] {
+                // TODO make this recursive and cache in NOdeLinks
+                const signature = getSignatureFromDeclaration(func);
+                let parameters: readonly ParameterDeclaration[] = func.parameters;
+                // Parameters may contain `this`
+                if (signature.parameters.length !== parameters.length) {
+                    parameters = parameters.slice(1);
+                }
+                const numArgs = parameters.length > callsite.arguments.length ? callsite.arguments.length : parameters.length;
+                const result = [];
+                for (let i = 0; i < numArgs; i++) {
+                    if (isFunctionType(getTypeOfParameter(signature.parameters[i]))) {
+                        const container = getInterproceduralContainer(callsite.arguments[i]);
+                        if (container && parameterAlwaysInvoked(parameters[i]) && shouldFlowIntoFunction(container)) {
+                            result.push(container);
+                        }
+                    }
+                }
+                return result;
+                // For each function parameter
+                // There must be at least one path from return to definition
+                // If there are assignments or paths where the function is not called, then
+                // Parameter is not always invoked
+                function parameterAlwaysInvoked(p: ParameterDeclaration): boolean {
+                    return walk(func.returnFlowNode!, /* seenInvoke */ false);
+                    function walk(flow: FlowNode, seenInvoke: boolean): boolean {
+                        if (flow.flags & FlowFlags.Interprocedural) {
+                            const funcName = (<FlowInterprocedural>flow).node.expression;
+                            if (isMatchingReference(funcName, p.name)) {
+                                seenInvoke = true;
+                            }
+                        }
+                        else if (flow.flags & FlowFlags.Start) {
+                            if ((<FlowStart>flow).container === func) {
+                                return seenInvoke;
+                            }
+                        }
+                        else if (flow.flags & FlowFlags.Assignment) {
+                            return false;
+                        }
+                        if ("antecedent" in flow) {
+                            return walk(flow.antecedent, seenInvoke);
+                        }
+                        else if ("antecedents" in flow) {
+                            return every(flow.antecedents!, flow => walk(flow, seenInvoke));
+                        }
+                        return false;
+                    }
+                }
+            }
+
+            function shouldFlowIntoFunction(func: FunctionLikeDeclaration): boolean {
+                if (!func.returnFlowNode) {
+                    return false;
+                }
+                // This also removes `this` and `super`
+                if (!isIdentifier(reference)) {
+                    return false;
+                }
+                if (!containsNonLocalAlias(func, reference)) {
+                    return false;
+                }
+                // Disallow recursion
+                if (some(interproceduralContainerStack, c => c === func)) {
+                    return false;
+                }
+                return true;
+
+                function containsNonLocalAlias(_func: FunctionLikeDeclaration, _alias: Node): boolean {
+                    // TODO this is hard. Many identifiers will cause diagnostics if resolveSymbol is attempted
+                    // Less precise Alternative is to find enclosing scope of reference and check whether func
+                    // Has access
+                    return true;
+                    /*if (!func.body) {
+                        return false;
+                    }
+                    let insideExpression = isExpressionNode(func.body);
+
+                    return !!forEachChild<boolean | undefined>(func.body, function walk(node): boolean {
+                        if (isPropertyAccessExpression(node)) {
+                            return false;
+                        }
+                        if (isMatchingReference(node, alias)) {
+                            return true;
+                        }
+                        return !!forEachChild(node, walk);
+                    });*/
+                }
+            }
+
             function getTypeAtFlowInterprocedural(flow: FlowInterprocedural): FlowType | undefined {
-                const container = getInterproceduralContainer(flow);
+                const container = getInterproceduralContainer(flow.node.expression);
                 if (!container || !container.returnFlowNode) {
                     return;
                 }
-                // Just ignore recursion for now
-                if (some(interproceduralContainerStack, c => c === container)) {
+                const flowInto = [];
+                if (shouldFlowIntoFunction(container)) {
+                    flowInto.push(container);
+                }
+                for (const func of getEmbeddableFunctionParameters(container, flow.node)) {
+                    pushIfUnique(flowInto, func);
+                }
+                interproceduralContainerStack.push(...flowInto);
+
+                const types: Type[] = [];
+                let incomplete = false;
+                for (const flowFunc of flowInto) {
+                    if (flowFunc.returnFlowNode) {
+                        const ftype = getTypeAtFlowNode(flowFunc.returnFlowNode);
+                        const type = getTypeFromFlowType(ftype);
+                        incomplete = incomplete || isIncomplete(ftype);
+                        if (type && type !== initialType) {
+                            pushIfUnique(types, type);
+                        }
+                    }
+                }
+
+                if (types.length === 0) {
                     return;
                 }
-                interproceduralContainerStack.push(container);
-                const mtype = getTypeAtFlowNode(container.returnFlowNode);
-                interproceduralContainerStack.pop();
-                return mtype === initialType ? undefined : mtype;
+
+                const newType = getUnionOrEvolvingArrayType(types, UnionReduction.Subtype);
+
+                /* @tslint:disable:prefer-for-of */
+                for (let i = 0; i < flowInto.length; i++) {
+                    interproceduralContainerStack.pop();
+                }
+                return createFlowType(newType, incomplete);
             }
 
             function isMatchingReferenceDiscriminant(expr: Expression, computedType: Type) {

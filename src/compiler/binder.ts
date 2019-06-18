@@ -899,7 +899,7 @@ namespace ts {
         }
 
         function createFlowInterprocedural(antecedent: FlowNode, node: CallExpression): FlowNode {
-            return flowNodeCreated({ flags: FlowFlags.Interprocedural, node, antecedent, marker: "TODO remove" });
+            return flowNodeCreated({ flags: FlowFlags.Interprocedural, node, antecedent });
         }
 
         function finishFlowLabel(flow: FlowLabel): FlowNode {
