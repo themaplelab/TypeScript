@@ -2308,6 +2308,7 @@ declare namespace ts {
         MarkerType = 8192,
         JSLiteral = 16384,
         FreshLiteral = 32768,
+        ArrayLiteral = 65536,
         ClassOrInterface = 3,
     }
     interface ObjectType extends Type {
@@ -4455,7 +4456,12 @@ declare namespace ts {
     function createAbstractBuilder(rootNames: ReadonlyArray<string> | undefined, options: CompilerOptions | undefined, host?: CompilerHost, oldProgram?: BuilderProgram, configFileParsingDiagnostics?: ReadonlyArray<Diagnostic>, projectReferences?: ReadonlyArray<ProjectReference>): BuilderProgram;
 }
 declare namespace ts {
-    function readBuilderProgram(compilerOptions: CompilerOptions, readFile: (path: string) => string | undefined): EmitAndSemanticDiagnosticsBuilderProgram | undefined;
+    interface ReadBuildProgramHost {
+        useCaseSensitiveFileNames(): boolean;
+        getCurrentDirectory(): string;
+        readFile(fileName: string): string | undefined;
+    }
+    function readBuilderProgram(compilerOptions: CompilerOptions, host: ReadBuildProgramHost): EmitAndSemanticDiagnosticsBuilderProgram | undefined;
     function createIncrementalCompilerHost(options: CompilerOptions, system?: System): CompilerHost;
     interface IncrementalProgramOptions<T extends BuilderProgram> {
         rootNames: ReadonlyArray<string>;
@@ -5173,6 +5179,12 @@ declare namespace ts {
          */
         originalTextSpan?: TextSpan;
         originalFileName?: string;
+        /**
+         * If DocumentSpan.textSpan is the span for name of the declaration,
+         * then this is the span for relevant declaration
+         */
+        contextSpan?: TextSpan;
+        originalContextSpan?: TextSpan;
     }
     interface RenameLocation extends DocumentSpan {
         readonly prefixText?: string;
@@ -5201,6 +5213,7 @@ declare namespace ts {
         fileName?: string;
         isInString?: true;
         textSpan: TextSpan;
+        contextSpan?: TextSpan;
         kind: HighlightSpanKind;
     }
     interface NavigateToItem {
@@ -6413,19 +6426,6 @@ declare namespace ts.server.protocol {
         body?: string[];
     }
     /**
-     * Arguments for EncodedSemanticClassificationsRequest request.
-     */
-    interface EncodedSemanticClassificationsRequestArgs extends FileRequestArgs {
-        /**
-         * Start position of the span.
-         */
-        start: number;
-        /**
-         * Length of the span.
-         */
-        length: number;
-    }
-    /**
      * Arguments in document highlight request; include: filesToSearch, file,
      * line, offset.
      */
@@ -6494,15 +6494,21 @@ declare namespace ts.server.protocol {
          */
         file: string;
     }
+    interface TextSpanWithContext extends TextSpan {
+        contextStart?: Location;
+        contextEnd?: Location;
+    }
+    interface FileSpanWithContext extends FileSpan, TextSpanWithContext {
+    }
     interface DefinitionInfoAndBoundSpan {
-        definitions: ReadonlyArray<FileSpan>;
+        definitions: ReadonlyArray<FileSpanWithContext>;
         textSpan: TextSpan;
     }
     /**
      * Definition response message.  Gives text range for definition.
      */
     interface DefinitionResponse extends Response {
-        body?: FileSpan[];
+        body?: FileSpanWithContext[];
     }
     interface DefinitionInfoAndBoundSpanReponse extends Response {
         body?: DefinitionInfoAndBoundSpan;
@@ -6511,13 +6517,13 @@ declare namespace ts.server.protocol {
      * Definition response message.  Gives text range for definition.
      */
     interface TypeDefinitionResponse extends Response {
-        body?: FileSpan[];
+        body?: FileSpanWithContext[];
     }
     /**
      * Implementation response message.  Gives text range for implementations.
      */
     interface ImplementationResponse extends Response {
-        body?: FileSpan[];
+        body?: FileSpanWithContext[];
     }
     /**
      * Request to get brace completion for a location in the file.
@@ -6554,7 +6560,7 @@ declare namespace ts.server.protocol {
         command: CommandTypes.Occurrences;
     }
     /** @deprecated */
-    interface OccurrencesResponseItem extends FileSpan {
+    interface OccurrencesResponseItem extends FileSpanWithContext {
         /**
          * True if the occurrence is a write location, false otherwise.
          */
@@ -6580,7 +6586,7 @@ declare namespace ts.server.protocol {
     /**
      * Span augmented with extra information that denotes the kind of the highlighting to be used for span.
      */
-    interface HighlightSpan extends TextSpan {
+    interface HighlightSpan extends TextSpanWithContext {
         kind: HighlightSpanKind;
     }
     /**
@@ -6610,7 +6616,7 @@ declare namespace ts.server.protocol {
     interface ReferencesRequest extends FileLocationRequest {
         command: CommandTypes.References;
     }
-    interface ReferencesResponseItem extends FileSpan {
+    interface ReferencesResponseItem extends FileSpanWithContext {
         /** Text of line containing the reference.  Including this
          *  with the response avoids latency of editor loading files
          * to show text of reference line (the server already has
@@ -6725,7 +6731,7 @@ declare namespace ts.server.protocol {
         /** The text spans in this group */
         locs: RenameTextSpan[];
     }
-    interface RenameTextSpan extends TextSpan {
+    interface RenameTextSpan extends TextSpanWithContext {
         readonly prefixText?: string;
         readonly suffixText?: string;
     }
@@ -9067,6 +9073,7 @@ declare namespace ts.server {
         private updateErrorCheck;
         private cleanProjects;
         private cleanup;
+        private getEncodedSyntacticClassifications;
         private getEncodedSemanticClassifications;
         private getProject;
         private getConfigFileAndProject;
@@ -9082,6 +9089,7 @@ declare namespace ts.server {
         private mapDefinitionInfo;
         private static mapToOriginalLocation;
         private toFileSpan;
+        private toFileSpanWithContext;
         private getTypeDefinition;
         private mapImplementationLocations;
         private getImplementation;
@@ -9139,7 +9147,6 @@ declare namespace ts.server {
         private mapLocationNavigationBarItems;
         private getNavigationBarItems;
         private toLocationNavigationTree;
-        private toLocationTextSpan;
         private getNavigationTree;
         private getNavigateToItems;
         private getFullNavigateToItems;

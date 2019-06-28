@@ -1442,7 +1442,8 @@ namespace ts {
                 },
                 ...(host.directoryExists ? { directoryExists: f => host.directoryExists!(f) } : {}),
                 useCaseSensitiveFileNames: () => host.useCaseSensitiveFileNames(),
-                getProgramBuildInfo: () => program.getProgramBuildInfo && program.getProgramBuildInfo()
+                getProgramBuildInfo: () => program.getProgramBuildInfo && program.getProgramBuildInfo(),
+                getSourceFileFromReference: (file, ref) => program.getSourceFileFromReference(file, ref),
             };
         }
 
@@ -2127,7 +2128,7 @@ namespace ts {
         }
 
         /** This should have similar behavior to 'processSourceFile' without diagnostics or mutation. */
-        function getSourceFileFromReference(referencingFile: SourceFile, ref: FileReference): SourceFile | undefined {
+        function getSourceFileFromReference(referencingFile: SourceFile | UnparsedSource, ref: FileReference): SourceFile | undefined {
             return getSourceFileFromReferenceWorker(resolveTripleslashReference(ref.fileName, referencingFile.fileName), fileName => filesByName.get(toPath(fileName)) || undefined);
         }
 
@@ -2773,7 +2774,7 @@ namespace ts {
                     // Ignore file that is not emitted
                     if (!sourceFileMayBeEmitted(file, options, isSourceFileFromExternalLibrary, getResolvedProjectReferenceToRedirect)) continue;
                     if (rootPaths.indexOf(file.path) === -1) {
-                        programDiagnostics.add(createCompilerDiagnostic(Diagnostics.File_0_is_not_in_project_file_list_Projects_must_list_all_files_or_use_an_include_pattern, file.fileName));
+                        programDiagnostics.add(createCompilerDiagnostic(Diagnostics.File_0_is_not_listed_within_the_file_list_of_project_1_Projects_must_list_all_files_or_use_an_include_pattern, file.fileName, options.configFilePath || ""));
                     }
                 }
             }
