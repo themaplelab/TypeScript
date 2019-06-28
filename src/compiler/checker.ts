@@ -16922,7 +16922,9 @@ namespace ts {
                 // If there are assignments or paths where the function is not called, then
                 // Parameter is not always invoked
                 function parameterAlwaysInvoked(p: ParameterDeclaration): boolean {
-                    return walk(func.returnFlowNode!, /* seenInvoke */ false);
+                    if (!func.returnFlowNode) return false;
+                    return walk(func.returnFlowNode, /* seenInvoke */ false);
+
                     function walk(flow: FlowNode, seenInvoke: boolean): boolean {
                         if (flow.flags & FlowFlags.Interprocedural) {
                             const funcName = (<FlowInterprocedural>flow).node.expression;
@@ -16936,7 +16938,9 @@ namespace ts {
                             }
                         }
                         else if (flow.flags & FlowFlags.Assignment) {
-                            return false;
+                            if (isMatchingReference(p, (<FlowAssignment>flow).node)) {
+                                return false;
+                            }
                         }
                         if ("antecedent" in flow) {
                             return walk(flow.antecedent, seenInvoke);
@@ -16957,7 +16961,11 @@ namespace ts {
                 if (!isIdentifier(reference)) {
                     return false;
                 }
-                if (!containsNonLocalAlias(func, reference)) {
+                const refSymbol = getResolvedSymbol(reference);
+                if (!refSymbol) return false;
+                if (!refSymbol.declarations[0]) return false;
+                const container = getDeclarationContainer(refSymbol.declarations[0]);
+                if (!canAccessReference(container, func)) {
                     return false;
                 }
                 // Disallow recursion
@@ -16966,25 +16974,8 @@ namespace ts {
                 }
                 return true;
 
-                function containsNonLocalAlias(_func: FunctionLikeDeclaration, _alias: Node): boolean {
-                    // TODO this is hard. Many identifiers will cause diagnostics if resolveSymbol is attempted
-                    // Less precise Alternative is to find enclosing scope of reference and check whether func
-                    // Has access
-                    return true;
-                    /*if (!func.body) {
-                        return false;
-                    }
-                    let insideExpression = isExpressionNode(func.body);
-
-                    return !!forEachChild<boolean | undefined>(func.body, function walk(node): boolean {
-                        if (isPropertyAccessExpression(node)) {
-                            return false;
-                        }
-                        if (isMatchingReference(node, alias)) {
-                            return true;
-                        }
-                        return !!forEachChild(node, walk);
-                    });*/
+                function canAccessReference(container: Node, func: FunctionLikeDeclaration): boolean {
+                    return !!findAncestor(func, node => node === container);
                 }
             }
 
@@ -17021,8 +17012,7 @@ namespace ts {
 
                 const newType = getUnionOrEvolvingArrayType(types, UnionReduction.Subtype);
 
-                /* @tslint:disable:prefer-for-of */
-                for (let i = 0; i < flowInto.length; i++) {
+                for (const _ of flowInto) {
                     interproceduralContainerStack.pop();
                 }
                 return createFlowType(newType, incomplete);
