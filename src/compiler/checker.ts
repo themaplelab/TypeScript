@@ -16906,66 +16906,139 @@ namespace ts {
                         return undefined;
                     }
                     for (const declaration of symbol.declarations) {
-                        if (isFunctionLikeDeclaration(declaration) && declaration.returnFlowNode) {
+                        if (isFunctionLikeDeclaration(declaration) && declaration.returnFlowNode && declaration.body) {
                             return declaration;
                         }
                     }
+                }
+                if (isFunctionLikeDeclaration(expression) && expression.body) {
+                    return expression;
                 }
                 return undefined;
             }
 
             function getEmbeddableFunctionParameters(func: FunctionLikeDeclaration, callsite: CallExpression): FunctionLikeDeclaration[] {
-                // TODO make this recursive and cache in NOdeLinks
-                const signature = getSignatureFromDeclaration(func);
-                let parameters: readonly ParameterDeclaration[] = func.parameters;
-                // Parameters may contain `this`
-                if (signature.parameters.length !== parameters.length) {
-                    parameters = parameters.slice(1);
-                }
-                const numArgs = parameters.length > callsite.arguments.length ? callsite.arguments.length : parameters.length;
-                const result = [];
-                for (let i = 0; i < numArgs; i++) {
-                    if (isFunctionType(getTypeOfParameter(signature.parameters[i]))) {
-                        const container = getInterproceduralContainer(callsite.arguments[i]);
-                        if (container && parameterAlwaysInvoked(parameters[i]) && shouldFlowIntoFunction(container)) {
-                            result.push(container);
-                        }
-                    }
-                }
-                return result;
-                // For each function parameter
-                // There must be at least one path from return to definition
-                // If there are assignments or paths where the function is not called, then
-                // Parameter is not always invoked
-                function parameterAlwaysInvoked(p: ParameterDeclaration): boolean {
-                    if (!func.returnFlowNode) return false;
-                    return walk(func.returnFlowNode, /* seenInvoke */ false);
+                return getFunctionBodies(getParametersAlwaysInvoked(func, callsite), callsite.arguments);
 
-                    function walk(flow: FlowNode, seenInvoke: boolean): boolean {
-                        if (flow.flags & FlowFlags.Interprocedural) {
-                            const funcName = (<FlowInterprocedural>flow).node.expression;
-                            if (isMatchingReference(funcName, p.name)) {
-                                seenInvoke = true;
-                            }
-                        }
-                        else if (flow.flags & FlowFlags.Start) {
-                            if ((<FlowStart>flow).container === func) {
-                                return seenInvoke;
-                            }
-                        }
-                        else if (flow.flags & FlowFlags.Assignment) {
-                            if (isMatchingReference(p, (<FlowAssignment>flow).node)) {
-                                return false;
-                            }
-                        }
-                        if ("antecedent" in flow) {
-                            return walk(flow.antecedent, seenInvoke);
-                        }
-                        else if ("antecedents" in flow) {
-                            return every(flow.antecedents!, flow => walk(flow, seenInvoke));
-                        }
-                        return false;
+                function getParametersAlwaysInvoked(func: FunctionLikeDeclaration, callsite: CallExpression, seenFuncs: FunctionLikeDeclaration[] = []): boolean[] {
+                    const functionBodyDeclaration = getFunctionImplementation(func);
+                    if (!functionBodyDeclaration || !isFunctionLikeDeclaration(functionBodyDeclaration)) {
+                        return [];
                     }
+                    // Can't use getEffectiveCallArguments because it recursively invokes getTypeAtFlowNode
+                    const callArguments = callsite.arguments;
+                    const links = getNodeLinks(functionBodyDeclaration);
+                    if (links.parametersAlwaysInvoked) {
+                        return links.parametersAlwaysInvoked;
+                    }
+                    links.parametersAlwaysInvoked = [];
+
+                    // Bail out on recursion
+                    if (contains(seenFuncs, functionBodyDeclaration)) {
+                        return [];
+                    }
+                    seenFuncs.push(functionBodyDeclaration);
+
+                    const bodySignature = getSignatureFromDeclaration(functionBodyDeclaration);
+                    const parameters = getSimpleParameters(functionBodyDeclaration);
+
+                    const numArgs = parameters.length > callArguments.length ? callArguments.length : parameters.length;
+                    for (let i = 0; i < numArgs; i++) {
+                        if (isFunctionType(getTypeOfParameter(bodySignature.parameters[i]))) {
+                            if (parameterAlwaysInvoked(functionBodyDeclaration, parameters[i])) {
+                                links.parametersAlwaysInvoked.push(/* items */ true);
+                            }
+                            else {
+                                links.parametersAlwaysInvoked.push(/* items */ false);
+                            }
+                        }
+                        else {
+                            links.parametersAlwaysInvoked.push(/* items */ false);
+                        }
+                    }
+
+                    seenFuncs.pop();
+                    return links.parametersAlwaysInvoked;
+
+                    // For each function parameter
+                    // There must be at least one path from return to definition
+                    // If there are assignments or paths where the function is not called, then
+                    // Parameter is not always invoked
+                    function parameterAlwaysInvoked(func: FunctionLikeDeclaration, p: ParameterDeclaration): boolean {
+                        if (!func.returnFlowNode) return false;
+                        return walk(func.returnFlowNode, /* seenInvoke */ false);
+
+                        function walk(flow: FlowNode, seenInvoke: boolean): boolean {
+                            if (flow.flags & FlowFlags.Interprocedural) {
+                                const interFlow = <FlowInterprocedural>flow;
+                                const funcName = interFlow.node.expression;
+                                if (isMatchingReference(funcName, p.name)) {
+                                    seenInvoke = true;
+                                }
+                                else {
+                                    const argIndices = mapDefined(interFlow.node.arguments, (arg, i) => {
+                                        if (isMatchingReference(arg, p.name)) {
+                                            return i;
+                                        }
+                                    });
+                                    if (argIndices.length > 0) {
+                                        const argFunc = getInterproceduralContainer(interFlow.node.expression);
+                                        if (argFunc) {
+                                            const subParam = getParametersAlwaysInvoked(argFunc, interFlow.node, seenFuncs);
+                                            if (some(argIndices, i => subParam[i])) {
+                                                seenInvoke = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            else if (flow.flags & FlowFlags.Start) {
+                                if ((<FlowStart>flow).container === func) {
+                                    return seenInvoke;
+                                }
+                            }
+                            else if (flow.flags & FlowFlags.Assignment) {
+                                if (isMatchingReference(p, (<FlowAssignment>flow).node)) {
+                                    return false;
+                                }
+                            }
+                            if ("antecedent" in flow) {
+                                return walk(flow.antecedent, seenInvoke);
+                            }
+                            else if ("antecedents" in flow) {
+                                return every(flow.antecedents!, flow => walk(flow, seenInvoke));
+                            }
+                            return false;
+                        }
+                    }
+                }
+
+                function getFunctionBodies(paramsAlwaysInvoked: boolean[], args: readonly Expression[]): FunctionLikeDeclaration[] {
+                    return mapDefined(paramsAlwaysInvoked, (param, i) => {
+                        if (!param) {
+                            return;
+                        }
+                        const func = getInterproceduralContainer(args[i]);
+                        if (func && shouldFlowIntoFunction(func)) {
+                            return func;
+                        }
+                    });
+                }
+
+                function getSimpleParameters(func: FunctionLikeDeclaration): readonly ParameterDeclaration[] {
+                    let parameters: readonly ParameterDeclaration[] = func.parameters;
+                    // Parameters may contain `this`
+                    if (parameters.length > 0 && parameterIsThisKeyword(parameters[0])) {
+                        parameters = parameters.slice(1);
+                    }
+                    if (parameters.length > 0 && parameters[parameters.length - 1].dotDotDotToken) {
+                        parameters.slice(0, parameters.length - 1);
+                    }
+                    return parameters;
+                }
+
+                function getFunctionImplementation(func: FunctionLikeDeclaration): FunctionLikeDeclaration | undefined {
+                    return find(func.symbol.declarations, declr => !!(<FunctionLikeDeclaration>declr).body) as FunctionLikeDeclaration | undefined;
                 }
             }
 
